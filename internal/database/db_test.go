@@ -1,7 +1,6 @@
-package voucher_test
+package database_test
 
 import (
-	"database/sql"
 	"os"
 	"testing"
 	"time"

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strconv"
 )
 
 // GenerateSecurePIN generates a cryptographically secure numeric PIN of the specified length.
@@ -14,16 +15,24 @@ func GenerateSecurePIN(length int) (string, error) {
 	}
 
 	const digits = "0123456789"
-	pin := make([]byte, length)
+	// Generate length - 1 random digits
+	payloadLength := length - 1
+	pinBytes := make([]byte, payloadLength)
 	max := big.NewInt(int64(len(digits)))
 
-	for i := 0; i < length; i++ {
+	for i := 0; i < payloadLength; i++ {
 		num, err := rand.Int(rand.Reader, max)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate random number: %w", err)
 		}
-		pin[i] = digits[num.Int64()]
+		pinBytes[i] = digits[num.Int64()]
 	}
 
-	return string(pin), nil
+	payload := string(pinBytes)
+	checkDigit, err := CalculateLuhnDigit(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	return payload + strconv.Itoa(checkDigit), nil
 }

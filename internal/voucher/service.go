@@ -94,6 +94,11 @@ func (s *Service) RedeemPIN(pin string, user string) (int, error) {
 		return 0, err
 	}
 
+	// 2. Validate Checksum
+	if !crypto.ValidateLuhn(pin) {
+		return 0, fmt.Errorf("invalid PIN format")
+	}
+
 	hash := crypto.HashPIN(pin)
 	value, err := s.repo.Redeem(hash, user)
 	if err != nil {
