@@ -7,7 +7,7 @@ import (
 )
 
 // GenerateSecurePIN generates a cryptographically secure numeric PIN of the specified length.
-// The length must be between 12 and 16 digits.
+// The length is be between 12 and 16 digits.
 func GenerateSecurePIN(length int) (string, error) {
 	if length < 12 || length > 16 {
 		return "", fmt.Errorf("invalid PIN length: must be between 12 and 16")
