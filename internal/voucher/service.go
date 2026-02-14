@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 	"voucher-system/internal/crypto"
+	"voucher-system/internal/observability"
 	"voucher-system/internal/ratelimit"
 
 	"github.com/google/uuid"
@@ -81,6 +82,7 @@ func (s *Service) CreateBatch(value int, quantity int) ([]string, string, error)
 		return nil, "", fmt.Errorf("failed to save batch: %w", err)
 	}
 
+	observability.IncGenerated(quantity)
 	return pinList, batchID, nil
 }
 
@@ -91,22 +93,39 @@ func (s *Service) RedeemPIN(pin string, user string) (int, error) {
 	// 1. Check Rate Limit
 	allow, err := s.limiter.Allow(user)
 	if !allow {
+		observability.IncFailed("rate_limit_exceeded")
 		return 0, err
 	}
 
-	// 2. Validate Checksum
-	if !crypto.ValidateLuhn(pin) {
-		return 0, fmt.Errorf("invalid PIN format")
+	// 2. Validate Signature
+	if !crypto.ValidateSignature(pin, crypto.SecretKey) {
+		observability.IncFailed("invalid_signature")
+		return 0, fmt.Errorf("invalid PIN signature")
+	}
+
+	// 3. Extract Payload and Validate Checksum
+	// Payload is everything except last 4 digits
+	if len(pin) < 5 {
+		observability.IncFailed("invalid_length")
+		return 0, fmt.Errorf("invalid PIN length")
+	}
+	payload := pin[:len(pin)-4]
+
+	if !crypto.ValidateLuhn(payload) {
+		observability.IncFailed("invalid_checksum")
+		return 0, fmt.Errorf("invalid PIN format (luhn)")
 	}
 
 	hash := crypto.HashPIN(pin)
 	value, err := s.repo.Redeem(hash, user)
 	if err != nil {
+		observability.IncFailed("redemption_failed")
 		return 0, err
 	}
 
 	// 2. Reset Rate Limit on Success
 	s.limiter.Reset(user)
+	observability.IncRedeemed()
 
 	return value, nil
 }

@@ -1,6 +1,7 @@
 package voucher_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -29,37 +30,70 @@ func TestChecksumValidation(t *testing.T) {
 
 	user := "checksum_tester"
 
-	// 1. Generate a valid PIN (Luhn compliant)
-	validPIN, err := crypto.GenerateSecurePIN(12)
+	// 1. Generate a valid PIN (Luhn compliant payload + valid signature)
+	validPIN, err := crypto.GenerateSecurePIN(16)
 	if err != nil {
 		t.Fatalf("GenerateSecurePIN failed: %v", err)
 	}
-	if !crypto.ValidateLuhn(validPIN) {
-		t.Fatalf("Generated PIN %s failed Luhn validation", validPIN)
+	
+	// Valid PIN structure: [Payload (12) + Signature (4)]
+	if len(validPIN) != 16 {
+		t.Fatalf("Expected length 16, got %d", len(validPIN))
+	}
+	payload := validPIN[:12]
+	
+	if !crypto.ValidateLuhn(payload) {
+		t.Fatalf("Generated PIN payload %s failed Luhn validation", payload)
+	}
+	if !crypto.ValidateSignature(validPIN, crypto.SecretKey) {
+		t.Fatalf("Generated PIN %s failed signature validation", validPIN)
 	}
 
-	// 2. Transpose two digits to make it invalid (likely)
-	// Or just change the last digit.
+	// 2. Test Invalid Signature
+	// Modify last digit (part of signature)
 	runes := []rune(validPIN)
-	lastDigit := runes[len(runes)-1]
-	if lastDigit == '0' {
+	runes[len(runes)-1] = 'X' // Make it invalid hex/digit or just different
+	if runes[len(runes)-1] == '0' {
 		runes[len(runes)-1] = '1'
 	} else {
 		runes[len(runes)-1] = '0'
 	}
-	invalidPIN := string(runes)
+	invalidSigPIN := string(runes)
 
-	// Verify our invalid PIN is actually invalid (Luhn can detect single digit errors)
-	if crypto.ValidateLuhn(invalidPIN) {
-		t.Fatalf("Failed to create an invalid PIN from valid one. PIN: %s", invalidPIN)
-	}
-
-	// 3. Attempt redeem with invalid PIN
-	_, err = service.RedeemPIN(invalidPIN, user)
+	_, err = service.RedeemPIN(invalidSigPIN, user)
 	if err == nil {
-		t.Fatal("Expected error for invalid checksum, got nil")
+		t.Fatal("Expected error for invalid signature, got nil")
 	}
-	if err.Error() != "invalid PIN format" {
+	if !strings.Contains(err.Error(), "invalid PIN signature") {
+		t.Errorf("Expected 'invalid PIN signature' error, got: %v", err)
+	}
+
+	// 3. Test Invalid Luhn (but Valid Signature)
+	// We need to construct a PIN with:
+	// - Payload that fails Luhn
+	// - Valid Signature for that *bad* payload
+	// Because RedeemPIN checks Signature FIRST. If signature is wrong, we get "invalid PIN signature".
+	// We want to reach "invalid PIN format (luhn)".
+	
+	badPayload := "123456789012" // 12 digits. Let's make sure it fails Luhn.
+	if crypto.ValidateLuhn(badPayload) {
+		// If it happens to be valid, change last digit
+		badPayload = "123456789013"
+	}
+	
+	// Sign this bad payload
+	sig, err := crypto.SignPIN(badPayload, crypto.SecretKey)
+	if err != nil {
+		t.Fatalf("SignPIN failed: %v", err)
+	}
+	
+	pinWithBadLuhn := badPayload + sig
+	
+	_, err = service.RedeemPIN(pinWithBadLuhn, user)
+	if err == nil {
+		t.Fatal("Expected error for invalid Luhn, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid PIN format") {
 		t.Errorf("Expected 'invalid PIN format' error, got: %v", err)
 	}
 }
